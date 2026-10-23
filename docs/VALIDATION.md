@@ -14,7 +14,7 @@ Speed: **a few seconds** wall clock (4-6 s measured on ~600 sessions; 8 processe
 | Tool outputs >20k chars | 1,417 | 1,800 | higher: +3 days of logs, and the pre-filter no longer assumes a fixed field order (an earlier version missed some results) |
 | Subagent base median | 30k | 34k | close; we use the first call's full context (input + cache) |
 | Subagent base share | 47% of subagent *carry* | 11.8% of subagent *cost* (5.4% of total) | different definition, not comparable: the earlier number attributed token carry by source; we price the base re-read at the cache-read rate (capped by the session's real cache-read spend) and divide by all subagent cost, which includes cache writes and output |
-| File-hunting | ~8% | strict: 28 runs, <0.1%; loose upper bound (any call that ran ls/find/grep/cat/git log...): 58% of whole-call cost | the earlier 8% attributed browse *output*. We have no per-output attribution, so the strict metric (browse tools spanning 3+ API calls with no read/edit after) is a lower bound and the loose one an upper bound |
+| File-hunting | ~8% | strict: 28 runs, <0.1%; loose upper bound (any call that ran ls/find/grep/cat/git log...): 57% of whole-call cost | the earlier 8% attributed browse *output*. We have no per-output attribution, so the strict metric (browse tools spanning 3+ API calls with no read/edit after) is a lower bound and the loose one an upper bound |
 
 ## Method notes
 - One API message is written as several lines (one per content block) with repeated usage; we de-duplicate by `message.id` (messages without an id are never merged).
