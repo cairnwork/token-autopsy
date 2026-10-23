@@ -173,7 +173,7 @@ def _write(path, lines):
 
 
 def _asst(mid, sec, tools, cr=1000):
-    blocks = [{"type": "tool_use", "id": f"t{i}", "name": n, "input": inp} for i, (n, inp) in enumerate(tools)]
+    blocks = [{"type": "tool_use", "id": f"t{mid}_{i}", "name": n, "input": inp} for i, (n, inp) in enumerate(tools)]
     return {"type": "assistant", "timestamp": "2026-10-01T00:00:%02dZ" % sec, "message": {
         "id": mid, "model": "claude-opus-5-5", "content": blocks,
         "usage": {"input_tokens": 1, "cache_read_input_tokens": cr, "cache_creation_input_tokens": 0, "output_tokens": 1}}}
@@ -266,3 +266,58 @@ def test_main_empty_argv_does_not_read_sys_argv(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "scan", lambda *a, **k: [])
     monkeypatch.chdir(tmp_path)
     assert cli.main([]) == 0          # [] means the default `scan`, not sys.argv
+
+
+def test_parse_date_offsets_and_datetimes():
+    from datetime import datetime, timezone
+    assert parse_date("2026-10-01T00:00:00Z") == datetime(2026, 10, 1, tzinfo=timezone.utc).timestamp()
+    assert parse_date("2026-10-01T00:00:00-07:00") == datetime(2026, 10, 1, 7, tzinfo=timezone.utc).timestamp()
+    assert parse_date("2026-10-01T00:00:00+02:00") == datetime(2026, 9, 30, 22, tzinfo=timezone.utc).timestamp()
+    # a datetime --until is an exact instant; a bare date --until is the whole day
+    assert parse_date("2026-10-01T12:00:00Z", end=True) == parse_date("2026-10-01T12:00:00Z")
+    assert parse_date("2026-10-01", end=True) - parse_date("2026-10-01") == 86400
+
+
+def test_spaced_json_still_parsed(tmp_path):
+    f = tmp_path / "-p" / "s.jsonl"
+    os.makedirs(f.parent)
+    o = _asst("a", 0, [("Bash", {"command": "sleep 5"})])
+    with open(f, "w") as fh:
+        fh.write(json.dumps(o) + "\n")          # default separators: '"type": "assistant"'
+    r = scan(load_prices(None), str(tmp_path), jobs=1)[0]
+    assert r["n_calls"] == 1 and r["sleep_calls"] == 1
+
+
+def test_streamed_tool_use_not_double_counted(tmp_path):
+    f = tmp_path / "-p" / "s.jsonl"
+    a = _asst("a", 0, [("Bash", {"command": "sleep 5"})])
+    _write(str(f), [a, a])                      # same message and same tool_use id written twice
+    r = scan(load_prices(None), str(tmp_path), jobs=1)[0]
+    assert r["n_calls"] == 1 and r["sleep_calls"] == 1 and r["sleep_secs"] == 5
+
+
+def test_from_file_project_filter_uses_same_salt(tmp_path, capsys):
+    out = tmp_path / "s.json"
+    cli.main(["scan", FIX, "-o", str(out), "--jobs", "1"])
+    capsys.readouterr()
+    cli.main(["report", "--from", str(out), "--format", "json", "--project=-proj-a"])
+    assert json.loads(capsys.readouterr().out)["calls"] == 15      # real name matches its stored mask
+    cli.main(["report", "--from", str(out), "--format", "json", "--project=-proj-b"])
+    assert json.loads(capsys.readouterr().out)["calls"] == 0
+
+
+def test_sleep_uses_first_word_of_each_command():
+    assert classify_bash('echo "sleep 5"')[0] != "poll"
+    assert classify_bash("grep sleep file.txt")[0] != "poll"
+    assert classify_bash("cd /x && sleep 3")[0] == "poll"
+    assert classify_bash("for i in 1 2; do sleep 4; done") == ("poll", 4.0)
+    assert classify_bash("until ok; do sleep 1m; done") == ("poll", 60.0)
+    assert classify_bash("python3 -c 'import time; time.sleep(5)'")[0] != "poll"
+    assert sleep_seconds('echo "sleep 9"') == 0
+
+
+def test_bare_invocation_with_options_means_scan(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "scan", lambda *a, **k: [])
+    assert cli.main(["--since", "2026-10-01", "--no-such-flag-ignored"][:2]) == 0
+    assert cli.main([]) == 0

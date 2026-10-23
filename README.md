@@ -9,7 +9,7 @@ All dollar figures are **estimates at list price, not a bill** (subscription use
 ## Install
 
 ```sh
-git clone <this repo> && cd token-autopsy
+git clone https://github.com/cairnwork/token-autopsy.git && cd token-autopsy
 python3 -m venv .venv && .venv/bin/pip install -e .
 .venv/bin/token-autopsy --help
 ```
@@ -17,35 +17,37 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 ## Usage
 
 ```sh
-token-autopsy scan                         # scan ~/.claude/projects, save token-autopsy-scan.json (a few seconds: 5.7 s measured on 582 sessions)
+token-autopsy scan                         # scan ~/.claude/projects, save token-autopsy-scan.json (a few seconds: 4-6 s measured on ~600 sessions)
 token-autopsy report                       # text report; add --format markdown|json, --lang zh, -o FILE
 token-autopsy rules --lang zh              # the three rules with estimated saving
 ```
 
 Filters (all subcommands): `--since 2026-10-01 --until 2026-10-15 --project myrepo --prices my_prices.json --jobs 4`, or a positional path to a projects directory. `report`/`rules` accept `--from token-autopsy-scan.json` to reuse a scan; `--since/--until/--project` then filter at session level (a saved scan has no per-call timestamps), and `--prices`/`--show-paths` are ignored.
 
+Project names start with `-` and must be given as `--project=-name`.
+
 Prices (list prices dated 2026-10-23, please keep them updated): edit `src/token_autopsy/default_prices.json` or pass `--prices FILE` (or put one at `~/.config/token-autopsy/prices.json`). Unknown models use the fallback rate and are flagged.
 
-## Example output (one machine's sample: 3,963 files, 597 sessions, 2026-10-23; not a general rate)
+## Example output (one machine's sample: 3,964 files, 598 sessions, 2026-10-23; not a general rate)
 
 ```
-Tokens                      27.11B
-Estimated cost (secondary)  $11,899  [estimate, not a bill]
+Tokens                      27.13B
+Estimated cost (secondary)  $11,905  [estimate, not a bill]
 
 Kind           tokens   % tokens  Cost    % cost
-cache re-read  26.09B   96.2%     $5,836  49.1%
-cache write    977.09M  3.6%      $5,093  42.8%
+cache re-read  26.11B   96.2%     $5,840  49.1%
+cache write    977.45M  3.6%      $5,095  42.8%
 Cache hits are not waste in themselves; the cost comes from how large the
 context was when it was re-read.
 
 Context  Calls   % tokens  % cost
->200k    43,997  69.6%     65.4%
-Polling calls: 5392 costing $895 (7.5% of total)
+>200k    44,032  69.6%     65.4%
+Polling calls: 5194 costing $879 (7.4% of total)
 
 1. Restart or compact once context passes 200k tokens.
-   modelled estimate: 10-20% of cost; overlaps with the other rules, do not add
+   modelled estimate: 10.0-20.1% of cost; overlaps with the other rules, do not add
 2. Never poll with sleep loops; use one blocking wait.
-   modelled estimate: 5.3-7.5% of cost; overlaps with the other rules, do not add
+   modelled estimate: 5.2-7.4% of cost; overlaps with the other rules, do not add
 3. Trim the base context (tool definitions, CLAUDE.md).
    modelled estimate: 1.3-1.5% (assumed constant); overlaps, do not add
 ```

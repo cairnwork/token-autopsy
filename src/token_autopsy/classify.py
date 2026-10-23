@@ -22,27 +22,48 @@ EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 _MULT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 
 
-def sleep_seconds(cmd: str) -> float:
-    return sum(float(n) * _MULT[u] for n, u in SLEEP_RE.findall(cmd))
+_KEYWORDS = {"do", "then", "else", "elif", "while", "until", "if", "!", "{", "(", "time", "exec"}
+_QUOTED = re.compile(r"\"(?:\\.|[^\"\\])*\"|'[^']*'")
 
 
 def _first_words(cmd: str):
+    """Yield the words of each sub-command, after dropping shell keywords and leading cd/env."""
+    cmd = _QUOTED.sub('""', cmd)
     for part in SPLIT_RE.split(cmd):
-        words = part.strip().split()
-        while words and (words[0] in ("cd", "export", "env", "time", "sudo") or "=" in words[0].split("/")[0]):
-            if words[0] == "cd":
-                words = []
-                break
+        words = part.strip().lstrip("$(`{").split()
+        while words and (words[0] in _KEYWORDS or words[0] in ("export", "env", "sudo")
+                         or "=" in words[0].split("/")[0]):
             words = words[1:]
+        if words and words[0] == "cd":
+            continue
         if words:
             yield words
 
 
+def _sleep_args(words) -> float:
+    total, ok = 0.0, False
+    for w in words[1:]:
+        m = re.fullmatch(r"(\d+(?:\.\d+)?)([smhd]?)", w)
+        if m:
+            total += float(m.group(1)) * _MULT[m.group(2)]
+            ok = True
+        elif ok or not w.startswith("$"):
+            break
+    return total
+
+
+def sleep_seconds(cmd: str) -> float:
+    return sum(_sleep_args(w) for w in _first_words(cmd) if w[0] == "sleep")
+
+
+def is_sleep(cmd: str) -> bool:
+    return any(w[0] == "sleep" and len(w) > 1 for w in _first_words(cmd))
+
+
 def classify_bash(cmd: str) -> tuple[str, float]:
     """Return (kind, sleep_seconds)."""
-    secs = sleep_seconds(cmd)
-    if secs or SLEEP_RE.search(cmd):
-        return "poll", secs
+    if is_sleep(cmd):
+        return "poll", sleep_seconds(cmd)
     kinds = set()
     for words in _first_words(cmd):
         w = words[0].rsplit("/", 1)[-1]

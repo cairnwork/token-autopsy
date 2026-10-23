@@ -10,7 +10,7 @@ import time
 from . import __version__
 from .pricing import load_prices
 from .report import build_blocks, build_rules_blocks, render, to_json
-from .scan import CLAUDE_ROOT, parse_date, scan
+from .scan import CLAUDE_ROOT, get_salt, mask, parse_date, scan
 from .summarize import summarize
 
 DEFAULT_SCAN_FILE = "token-autopsy-scan.json"
@@ -35,7 +35,8 @@ def add_output_args(p: argparse.ArgumentParser) -> None:
 
 def filter_rows(rows: list[dict], since: str | None, until: str | None, project: str | None) -> list[dict]:
     """Session-level filter for saved scans: a row is kept if its time span overlaps the range
-    (a saved scan has no per-call timestamps) and its stored project name contains `project`."""
+    (a saved scan has no per-call timestamps) and its project matches: substring of the stored name
+    (scans made with --show-paths) or exact name whose salted mask equals the stored mask."""
     lo = parse_date(since) if since else None
     hi = parse_date(until, end=True) if until else None
     out = []
@@ -44,7 +45,7 @@ def filter_rows(rows: list[dict], since: str | None, until: str | None, project:
             continue
         if hi is not None and (r["first_ts"] is None or r["first_ts"] >= hi):
             continue
-        if project and project not in r["project"]:
+        if project and project not in r["project"] and mask(project, get_salt()) != r["project"]:
             continue
         out.append(r)
     return out
@@ -118,10 +119,10 @@ def main(argv=None) -> int:
     add_source_args(p); add_output_args(p)
     p.add_argument("--format", choices=("text", "markdown", "json"), default="text")
     p.set_defaults(fn=cmd_rules)
-    argv = sys.argv[1:] if argv is None else argv
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] not in ("scan", "report", "rules", "-h", "--help", "--version"):
+        argv = ["scan"] + argv        # bare `token-autopsy [options]` means `scan`
     a = ap.parse_args(argv)
-    if not a.cmd:
-        a = ap.parse_args(["scan"] + list(argv))
     return a.fn(a)
 
 

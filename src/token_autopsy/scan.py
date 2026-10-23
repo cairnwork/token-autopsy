@@ -14,6 +14,7 @@ import statistics
 from datetime import datetime, timezone
 
 import hashlib
+import re
 
 from .classify import classify_tool
 from .pricing import Pricer
@@ -89,11 +90,13 @@ def mask(name: str, salt: str = "") -> str:
 def parse_claude(path: str):
     """Yield-free parser: returns (calls, tools). Calls are dicts, tools are tuples."""
     calls, tools, idx = [], [], {}
+    seen_tool_ids: set = set()
     big = 0
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
-            if '"type":"assistant"' not in line:
-                if '"tool_result"' in line and len(line) > BIG_OUTPUT_CHARS and '"type":"user"' in line[:200]:
+            # cheap pre-filter only on whitespace-independent substrings; json.loads decides
+            if '"assistant"' not in line:
+                if '"tool_result"' in line and len(line) > BIG_OUTPUT_CHARS and '"user"' in line:
                     big += _big_results(line)
                 continue
             try:
@@ -127,6 +130,11 @@ def parse_claude(path: str):
             if isinstance(content, list):
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "tool_use":
+                        bid = b.get("id")
+                        if bid:
+                            if bid in seen_tool_ids:   # same block re-written by a later streaming line
+                                continue
+                            seen_tool_ids.add(bid)
                         kind, key, secs = classify_tool(b.get("name") or "", b.get("input"))
                         tools.append((ci, ts, kind, key, secs))
     return calls, tools, big
@@ -327,11 +335,12 @@ def scan(table: dict, claude_root: str = CLAUDE_ROOT, since: float | None = None
 
 
 def parse_date(s: str, end: bool = False) -> float:
-    """YYYY-MM-DD (local midnight; end=True gives the next midnight) or ISO datetime."""
-    try:
-        d = datetime.strptime(s, "%Y-%m-%d")
-        ts = d.timestamp()
+    """`YYYY-MM-DD` (local midnight; end=True gives the next local midnight so the day is inclusive)
+    or a full ISO datetime. A datetime with an explicit offset (Z, +02:00, -07:00) is taken as that
+    instant; one without is local time. A datetime is an exact instant even with end=True."""
+    s = s.strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+        ts = datetime.strptime(s, "%Y-%m-%d").timestamp()
         return ts + 86400 if end else ts
-    except ValueError:
-        return datetime.fromisoformat(s).replace(tzinfo=None).timestamp() if "+" not in s and "Z" not in s \
-            else datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+    d = datetime.fromisoformat(s[:-1] + "+00:00" if s.endswith("Z") else s)
+    return d.timestamp()  # naive -> local time, aware -> that instant
