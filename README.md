@@ -29,7 +29,7 @@ Prices (list prices dated 2026-10-23, please keep them updated): edit `src/token
 ## Example output (one machine's sample: 3,963 files, 597 sessions, 2026-10-23; not a general rate)
 
 ```
-Tokens                      27.12B
+Tokens                      27.11B
 Estimated cost (secondary)  $11,899  [estimate, not a bill]
 
 Kind           tokens   % tokens  Cost    % cost
@@ -39,7 +39,7 @@ Cache hits are not waste in themselves; the cost comes from how large the
 context was when it was re-read.
 
 Context  Calls   % tokens  % cost
->200k    ~44k    ~70%      ~66%
+>200k    43,997  69.6%     65.4%
 Polling calls: 5392 costing $895 (7.5% of total)
 
 1. Restart or compact once context passes 200k tokens.
