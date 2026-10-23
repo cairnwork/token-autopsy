@@ -98,7 +98,8 @@ def build_rules_blocks(s: dict, lang: str = "en") -> list:
                        f"({usd(r['save_low'])} - {usd(r['save_high'])}, {t['warn_short']})"))
     lo, hi = sum(r["save_low"] for r in rules), sum(r["save_high"] for r in rules)
     tot = s["cost"] or 1e-9
-    plo, phi = 100 * lo / tot, min(95.0, 100 * hi / tot)
+    phi = min(95.0, 100 * hi / tot)
+    plo = min(phi, 90.0, 100 * lo / tot)
     B.append(("p", f"{t['total_save']}: {plo:.1f}% - {phi:.1f}%"))
     B.append(("p", t["headroom"].format(lo=100 * (1 / (1 - plo / 100) - 1), hi=100 * (1 / (1 - phi / 100) - 1))))
     B.append(("p", t["rules_note"]))

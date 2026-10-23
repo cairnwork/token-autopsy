@@ -33,10 +33,31 @@ def add_output_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--top", type=int, default=10, help="number of top sessions (default 10)")
 
 
+def filter_rows(rows: list[dict], since: str | None, until: str | None, project: str | None) -> list[dict]:
+    """Session-level filter for saved scans: a row is kept if its time span overlaps the range
+    (a saved scan has no per-call timestamps) and its stored project name contains `project`."""
+    lo = parse_date(since) if since else None
+    hi = parse_date(until, end=True) if until else None
+    out = []
+    for r in rows:
+        if lo is not None and (r["last_ts"] is None or r["last_ts"] < lo):
+            continue
+        if hi is not None and (r["first_ts"] is None or r["first_ts"] >= hi):
+            continue
+        if project and project not in r["project"]:
+            continue
+        out.append(r)
+    return out
+
+
 def run_scan(a) -> list[dict]:
     if a.from_file:
         with open(a.from_file, encoding="utf-8") as f:
-            return json.load(f)["sessions"]
+            rows = json.load(f)["sessions"]
+        if a.prices or getattr(a, "show_paths", False):
+            print("note: --prices and --show-paths are ignored with --from (re-run scan to change them)",
+                  file=sys.stderr)
+        return filter_rows(rows, a.since, a.until, a.project)
     table = load_prices(a.prices)
     claude = a.path or CLAUDE_ROOT
     since = parse_date(a.since) if a.since else None
@@ -97,9 +118,10 @@ def main(argv=None) -> int:
     add_source_args(p); add_output_args(p)
     p.add_argument("--format", choices=("text", "markdown", "json"), default="text")
     p.set_defaults(fn=cmd_rules)
+    argv = sys.argv[1:] if argv is None else argv
     a = ap.parse_args(argv)
     if not a.cmd:
-        a = ap.parse_args(["scan"] + (argv or sys.argv[1:]))
+        a = ap.parse_args(["scan"] + list(argv))
     return a.fn(a)
 
 

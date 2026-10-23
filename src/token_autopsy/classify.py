@@ -75,7 +75,7 @@ def classify_tool(name: str, inp) -> tuple[str, str | None, float]:
     if name == "Bash":
         cmd = inp.get("command", "") if isinstance(inp, dict) else ""
         kind, secs = classify_bash(cmd)
-        return kind, cmd_key(cmd), secs
+        return kind, (cmd_key(cmd) if cmd.strip() else None), secs
     if name in BROWSE_TOOLS:
         return "browse", None, 0.0
     if name in READ_TOOLS:

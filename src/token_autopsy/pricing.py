@@ -18,10 +18,12 @@ def load_prices(path: str | None = None) -> dict:
             data = json.load(f)
     else:
         data = json.loads(resources.files("token_autopsy").joinpath("default_prices.json").read_text("utf-8"))
-    for e in data.get("models", []):
+    data.setdefault("models", [])
+    data.setdefault("fallback", {"input": 15.0, "cache_write": 18.75, "cache_read": 1.5, "output": 75.0})
+    for e in data["models"] + [data["fallback"]]:
         for k in KEYS:
             e.setdefault(k, 0.0)
-    data.setdefault("fallback", {"input": 15.0, "cache_write": 18.75, "cache_read": 1.5, "output": 75.0})
+        e.setdefault("cache_write_1h", 2 * e["input"])
     return data
 
 
@@ -43,7 +45,11 @@ class Pricer:
             self._cache[model] = r
         return r
 
-    def cost(self, model: str, inp: int, cw: int, cr: int, out: int) -> tuple[float, float, float, float]:
+    def cost(self, model: str, inp: int, cw: int, cr: int, out: int,
+             cw1h: int = 0) -> tuple[float, float, float, float]:
+        """cw is all cache-write tokens; cw1h is the part written with the 1-hour TTL (2x input)."""
         p, _ = self.lookup(model)
-        return (inp * p["input"] / 1e6, cw * p["cache_write"] / 1e6,
+        cw1h = min(max(cw1h, 0), cw)
+        return (inp * p["input"] / 1e6,
+                ((cw - cw1h) * p["cache_write"] + cw1h * p["cache_write_1h"]) / 1e6,
                 cr * p["cache_read"] / 1e6, out * p["output"] / 1e6)

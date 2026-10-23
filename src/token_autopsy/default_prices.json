@@ -1,12 +1,53 @@
 {
-  "_comment": "USD per million tokens. First entry whose 'match' substring appears in the model name wins. Nominal list prices for comparison; subscription users pay in quota, not cash. Override with --prices FILE or ~/.config/token-autopsy/prices.json.",
-  "models": [
-    {"match": "opus",   "input": 15.0, "cache_write": 18.75, "cache_read": 1.5,   "output": 75.0},
-    {"match": "fable",  "input": 15.0, "cache_write": 18.75, "cache_read": 1.5,   "output": 75.0},
-    {"match": "sonnet", "input": 3.0,  "cache_write": 3.75,  "cache_read": 0.3,   "output": 15.0},
-    {"match": "haiku",  "input": 1.0,  "cache_write": 1.25,  "cache_read": 0.1,   "output": 5.0},
-    {"match": "gpt",    "input": 1.25, "cache_write": 0.0,   "cache_read": 0.125, "output": 10.0},
-    {"match": "codex",  "input": 1.25, "cache_write": 0.0,   "cache_read": 0.125, "output": 10.0}
-  ],
-  "fallback": {"input": 15.0, "cache_write": 18.75, "cache_read": 1.5, "output": 75.0}
+ "_comment": "List prices in USD per million tokens as of 2026-10-23. These are published list prices, not your bill: please update them yourself (--prices FILE or ~/.config/token-autopsy/prices.json). First entry whose 'match' substring is in the model name wins. cache_write is the 5-minute write price (1.25x input); cache_write_1h defaults to 2x input when omitted.",
+ "models": [
+  {
+   "match": "opus-5-5",
+   "input": 4,
+   "cache_write": 5,
+   "cache_read": 0.2,
+   "output": 20
+  },
+  {
+   "match": "fable-5",
+   "input": 10,
+   "cache_write": 12.5,
+   "cache_read": 0.25,
+   "output": 50
+  },
+  {
+   "match": "opus-4-8",
+   "input": 5,
+   "cache_write": 6.25,
+   "cache_read": 0.5,
+   "output": 25
+  },
+  {
+   "match": "opus-4-6",
+   "input": 5,
+   "cache_write": 6.25,
+   "cache_read": 0.5,
+   "output": 25
+  },
+  {
+   "match": "sonnet-5-5",
+   "input": 2,
+   "cache_write": 2.5,
+   "cache_read": 0.2,
+   "output": 10
+  },
+  {
+   "match": "haiku-5-5",
+   "input": 0.1,
+   "cache_write": 0.125,
+   "cache_read": 0.01,
+   "output": 0.5
+  }
+ ],
+ "fallback": {
+  "input": 15,
+  "cache_write": 18.75,
+  "cache_read": 1.5,
+  "output": 75
+ }
 }

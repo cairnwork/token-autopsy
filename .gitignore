@@ -6,3 +6,4 @@ token-autopsy-scan.json
 build/
 dist/
 *.egg-info/
+docs/reviews/

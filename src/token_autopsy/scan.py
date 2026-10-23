@@ -57,8 +57,33 @@ def _big_results(line: str) -> int:
     return n
 
 
-def mask(name: str) -> str:
-    return "proj-" + hashlib.sha256(name.encode()).hexdigest()[:8]
+def config_dir() -> str:
+    return os.environ.get("TOKEN_AUTOPSY_HOME") or os.path.expanduser("~/.config/token-autopsy")
+
+
+def get_salt() -> str:
+    """Per-machine random salt for path masking, created on first use (mode 0600)."""
+    path = os.path.join(config_dir(), "salt")
+    try:
+        with open(path, encoding="ascii") as f:
+            salt = f.read().strip()
+        if salt:
+            return salt
+    except OSError:
+        pass
+    salt = os.urandom(16).hex()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="ascii") as f:
+            f.write(salt)
+    except OSError:
+        pass  # unwritable config dir: salt is per-run (masks stay unlinkable, just not stable)
+    return salt
+
+
+def mask(name: str, salt: str = "") -> str:
+    return "proj-" + hashlib.sha256((salt + "\0" + name).encode()).hexdigest()[:8]
 
 
 def parse_claude(path: str):
@@ -82,13 +107,17 @@ def parse_claude(path: str):
             model = m.get("model") or ""
             if not isinstance(u, dict) or model == "<synthetic>":
                 continue
-            mid = m.get("id") or o.get("uuid")
+            mid = m.get("id")
             ts = parse_ts(o.get("timestamp"))
-            ci = idx.get(mid)
+            ci = idx.get(mid) if mid else None
             out = u.get("output_tokens") or 0
             if ci is None:
-                ci = idx[mid] = len(calls)
-                calls.append({
+                ci = len(calls)
+                if mid:
+                    idx[mid] = ci
+                cc = u.get("cache_creation")
+                cw1h = (cc.get("ephemeral_1h_input_tokens") or 0) if isinstance(cc, dict) else 0
+                calls.append({"cw1h": cw1h,
                     "ts": ts, "model": model, "in": u.get("input_tokens") or 0,
                     "cw": u.get("cache_creation_input_tokens") or 0,
                     "cr": u.get("cache_read_input_tokens") or 0, "out": out})
@@ -138,7 +167,7 @@ def analyze(calls, tools, pricer: Pricer, row: dict, since=None, until=None) -> 
     costs = [0.0] * n
     ctxs = [0] * n
     for i, c in enumerate(calls):
-        ci, cw, cr, co = pricer.cost(c["model"], c["in"], c["cw"], c["cr"], c["out"])
+        ci, cw, cr, co = pricer.cost(c["model"], c["in"], c["cw"], c["cr"], c["out"], c.get("cw1h", 0))
         tot = ci + cw + cr + co
         ctx = c["in"] + c["cw"] + c["cr"]
         costs[i], ctxs[i] = tot, ctx
@@ -161,44 +190,59 @@ def analyze(calls, tools, pricer: Pricer, row: dict, since=None, until=None) -> 
     first = calls[0]
     row["base_ctx"] = ctxs[0]
     p0, _ = pricer.lookup(first["model"])
-    row["base_cost"] = ctxs[0] * (n - 1) * p0["cache_read"] / 1e6
+    row["base_cost"] = min(ctxs[0] * (n - 1) * p0["cache_read"] / 1e6, row["cost_cr"])
     tss = [c["ts"] for c in calls if c["ts"] is not None]
     row["first_ts"], row["last_ts"] = (min(tss), max(tss)) if tss else (None, None)
 
-    # polling: sleep loops and identical commands repeated within 60 s
-    sleep_calls, repeat_calls, browse_calls, explore_calls = set(), set(), set(), set()
-    last_seen: dict[str, float] = {}
+    # Per-tool attribution: a call's cost is split equally among its tool_use blocks, so a call
+    # that runs one flagged tool among three is charged one third, not the whole call.
+    ntools: dict[int, int] = {}
+    for t in tools:
+        ntools[t[0]] = ntools.get(t[0], 0) + 1
+
+    def share(counts: dict[int, int]) -> float:
+        return sum(costs[i] * k / ntools[i] for i, k in counts.items())
+
+    def bump(d, ci):
+        d[ci] = d.get(ci, 0) + 1
+
+    sleep_t, repeat_t, poll_t, browse_t, explore_t = {}, {}, {}, {}, {}
+    last_seen: dict[str, tuple[float, int]] = {}
     for (ci, ts, kind, key, secs) in tools:
-        if kind == "poll":
-            if ci not in sleep_calls:
-                sleep_calls.add(ci)
+        flagged_poll = kind == "poll"
+        if flagged_poll:
+            bump(sleep_t, ci)
             row["sleep_secs"] += secs
+        rep_hit = False
         if key is not None and ts is not None:
             prev = last_seen.get(key)
-            if prev is not None and 0 <= ts - prev <= REPEAT_WINDOW:
-                repeat_calls.add(ci)
-            last_seen[key] = ts
+            if prev is not None and prev[1] != ci and 0 <= ts - prev[0] <= REPEAT_WINDOW:
+                rep_hit = True
+                bump(repeat_t, ci)
+            last_seen[key] = (ts, ci)
+        if flagged_poll or rep_hit:
+            bump(poll_t, ci)
         if kind == "browse":
-            browse_calls.add(ci)
+            bump(browse_t, ci)
         if kind in ("browse", "shread"):
-            explore_calls.add(ci)
-    both = sleep_calls | repeat_calls
-    row["sleep_calls"], row["sleep_cost"] = len(sleep_calls), sum(costs[i] for i in sleep_calls)
-    row["repeat_calls"], row["repeat_cost"] = len(repeat_calls), sum(costs[i] for i in repeat_calls)
-    row["poll_calls"], row["poll_cost"] = len(both), sum(costs[i] for i in both)
-    row["browse_calls"], row["browse_cost"] = len(browse_calls), sum(costs[i] for i in browse_calls)
-    row["explore_calls"], row["explore_cost"] = len(explore_calls), sum(costs[i] for i in explore_calls)
+            bump(explore_t, ci)
+    row["sleep_calls"], row["sleep_cost"] = len(sleep_t), share(sleep_t)
+    row["repeat_calls"], row["repeat_cost"] = len(repeat_t), share(repeat_t)
+    row["poll_calls"], row["poll_cost"] = len(poll_t), share(poll_t)
+    row["browse_calls"], row["browse_cost"] = len(browse_t), share(browse_t)
+    row["explore_calls"], row["explore_cost"] = len(explore_t), share(explore_t)
 
-    # file-hunting: >=3 consecutive browse tools not followed by a read/edit
+    # file-hunting: browse tools spanning >=3 distinct API calls, not followed by a read/edit
     run: list[int] = []
-    waste: set[int] = set()
+    waste_t: dict[int, int] = {}
     runs = 0
 
     def close_run(next_kind):
         nonlocal runs
-        if len(run) >= MIN_BROWSE_RUN and next_kind not in ("read", "shread", "edit"):
+        if len(set(run)) >= MIN_BROWSE_RUN and next_kind not in ("read", "shread", "edit"):
             runs += 1
-            waste.update(run)
+            for c_ in run:
+                bump(waste_t, c_)
 
     for (ci, ts, kind, key, secs) in tools:
         if kind == "browse":
@@ -207,8 +251,8 @@ def analyze(calls, tools, pricer: Pricer, row: dict, since=None, until=None) -> 
             close_run(kind)
             run = []
     close_run(None)
-    row["waste_runs"], row["waste_calls"] = runs, len(waste)
-    row["waste_cost"] = sum(costs[i] for i in waste)
+    row["waste_runs"], row["waste_calls"] = runs, len(waste_t)
+    row["waste_cost"] = share(waste_t)
     return row
 
 
@@ -227,18 +271,18 @@ def discover(claude_root: str, project: str | None):
 _G: dict = {}
 
 
-def _init(table, since, until, claude_root, show_paths):
+def _init(table, since, until, claude_root, show_paths, salt=""):
     _G.update(pricer=Pricer(table), since=since, until=until,
-              claude_root=os.path.expanduser(claude_root), show_paths=show_paths)
+              claude_root=os.path.expanduser(claude_root), show_paths=show_paths, salt=salt)
 
 
 def _work(path):
     try:
         parts = os.path.relpath(path, _G["claude_root"]).split(os.sep)
-        project = parts[0] if _G["show_paths"] else mask(parts[0])
+        project = parts[0] if _G["show_paths"] else mask(parts[0], _G["salt"])
         stem = os.path.splitext(parts[-1])[0]
         sub = "subagents" in parts
-        root = parts[1] if sub and len(parts) > 2 else stem
+        root = parts[1] if sub and len(parts) >= 4 and parts[1] != "subagents" else stem
         calls, tools, big = parse_claude(path)
         if not calls:
             return None
@@ -254,7 +298,7 @@ def scan(table: dict, claude_root: str = CLAUDE_ROOT, since: float | None = None
     files = discover(claude_root, project)
     files.sort(key=lambda p: -os.path.getsize(p))  # big first for load balance
     jobs = jobs or min(8, os.cpu_count() or 1)
-    args = (table, since, until, claude_root, show_paths)
+    args = (table, since, until, claude_root, show_paths, "" if show_paths else get_salt())
     if jobs <= 1 or len(files) < 2:
         _init(*args)
         return [r for r in map(_work, files) if r]

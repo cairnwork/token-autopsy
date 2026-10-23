@@ -17,33 +17,33 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 ## Usage
 
 ```sh
-token-autopsy scan                         # scan ~/.claude/projects, save token-autopsy-scan.json (~seconds)
+token-autopsy scan                         # scan ~/.claude/projects, save token-autopsy-scan.json (about 3-5 seconds for ~4,000 files)
 token-autopsy report                       # text report; add --format markdown|json, --lang zh, -o FILE
 token-autopsy rules --lang zh              # the three rules with estimated saving
 ```
 
-Filters (all subcommands): `--since 2026-10-01 --until 2026-10-15 --project myrepo --prices my_prices.json --jobs 4`, or a positional path to a projects directory. `report`/`rules` accept `--from token-autopsy-scan.json` to reuse a scan.
+Filters (all subcommands): `--since 2026-10-01 --until 2026-10-15 --project myrepo --prices my_prices.json --jobs 4`, or a positional path to a projects directory. `report`/`rules` accept `--from token-autopsy-scan.json` to reuse a scan; `--since/--until/--project` then filter at session level (a saved scan has no per-call timestamps), and `--prices`/`--show-paths` are ignored.
 
-Prices: edit `src/token_autopsy/default_prices.json` or pass `--prices FILE` (or put one at `~/.config/token-autopsy/prices.json`). Unknown models use the fallback rate and are flagged.
+Prices (list prices dated 2026-10-23, please keep them updated): edit `src/token_autopsy/default_prices.json` or pass `--prices FILE` (or put one at `~/.config/token-autopsy/prices.json`). Unknown models use the fallback rate and are flagged.
 
-## Example output (numbers from the author's machine, 3,919 files)
+## Example output (numbers from the author's machine, 3,928 files, 2026-10-23)
 
 ```
-Tokens                      26.81B
-Estimated cost (secondary)  $55,227  [estimate, not a bill]
+Tokens                      26.89B
+Estimated cost (secondary)  $11,806  [estimate, not a bill]
 
-Kind           tokens   % tokens  Cost     % cost
-cache re-read  25.80B   96.2%     $36,536  66.2%
-cache write    969.00M  3.6%      $15,993  29.0%
-Context  Calls   tokens   % tokens  Cost     % cost
-<50k     16,618  464.10M  1.7%      $1,914   3.5%
-50-200k  68,607  7.63B    28.5%     $15,258  27.6%
->200k    43,503  18.72B   69.8%     $38,055  68.9%
-Polling calls: 5373 costing $4,046 (7.3% of total)
+Kind           tokens   % tokens  Cost    % cost
+cache re-read  25.88B   96.2%     $5,790  49.0%
+cache write    970.52M  3.6%      $5,066  42.9%
+Context  Calls   tokens   % tokens  Cost    % cost
+<50k     16,631  464.69M  1.7%      $577    4.9%
+50-200k  68,867  7.66B    28.5%     $3,483  29.5%
+>200k    43,621  18.76B   69.8%     $7,746  65.6%
+Polling calls: 5373 costing $894 (7.6% of total)
 
-1. Restart or compact once context passes 200k tokens.  saves 13.5% - 27.0%
-2. Never poll with sleep loops; use one blocking wait.   saves 5.1% - 7.3%
-3. Trim the base context (tool definitions, CLAUDE.md).   saves 1.9% - 2.1%
+1. Restart or compact once context passes 200k tokens.  saves 10.1% - 20.2%
+2. Never poll with sleep loops; use one blocking wait.   saves 5.3% - 7.6%
+3. Trim the base context (tool definitions, CLAUDE.md).   saves 1.3% - 1.5%  (assumed constant)
 ```
 
 See `docs/VALIDATION.md` for how these numbers compare with the earlier manual autopsy, and what each estimate assumes.
@@ -52,7 +52,7 @@ See `docs/VALIDATION.md` for how these numbers compare with the earlier manual a
 
 - Everything runs locally. **The tool opens no network connections.**
 - Output (screen, JSON, Markdown, scan file) contains only aggregate numbers, session ids, model names, tool-name-derived counts and timestamps.
-- Project directory names are **masked as `proj-<hash>` by default**; pass `--show-paths` to show them.
+- Project directory names are **masked as `proj-<hash>` by default** (salted hash; the random salt is created once per machine in `~/.config/token-autopsy/salt`, mode 0600, so masks cannot be reversed with a dictionary of known paths). Pass `--show-paths` to show real names.
 - Prompts, file contents, command text and tool output are read in memory only to classify them (e.g. "is this a `sleep` loop?") and are never stored or printed. Repeated-command detection uses a hash that stays in memory.
 - Tests use synthetic fixtures only.
 
