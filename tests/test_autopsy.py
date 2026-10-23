@@ -90,7 +90,7 @@ def test_browse_waste(rows):
 def test_subagent_base(rows, summ):
     s = by_id(rows, "agent-1")
     assert s["base_ctx"] == 30005
-    assert s["base_cost"] == pytest.approx(30005 * 2 * 0.2 / 1e6)
+    assert s["base_cost"] == pytest.approx((30000 + 30005) * 0.2 / 1e6)
     assert summ["subagents"]["median_base_ctx"] == 30005
 
 
@@ -321,3 +321,63 @@ def test_bare_invocation_with_options_means_scan(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "scan", lambda *a, **k: [])
     assert cli.main(["--since", "2026-10-01", "--no-such-flag-ignored"][:2]) == 0
     assert cli.main([]) == 0
+
+
+def _asst_model(mid, sec, model, cr, cw=0):
+    o = _asst(mid, sec, [], cr=cr)
+    o["message"]["model"] = model
+    o["message"]["usage"]["cache_creation_input_tokens"] = cw
+    return o
+
+
+def test_base_cost_uses_each_calls_own_model_price(tmp_path):
+    f = tmp_path / "-p" / "s.jsonl"
+    _write(str(f), [_asst_model("a", 0, "claude-opus-5-5", 0, cw=100000),
+                    _asst_model("b", 1, "claude-haiku-5-5", 100000),
+                    _asst_model("c", 2, "claude-haiku-5-5", 100000)])
+    r = scan(load_prices(None), str(tmp_path), jobs=1)[0]
+    # two re-reads of the 100k base, both billed at Haiku's cache-read price (0.01/M), not Opus's 0.2/M
+    assert r["base_cost"] == pytest.approx(2 * 100000 * 0.01 / 1e6, rel=1e-3)
+
+
+def test_unreadable_file_is_reported_not_silent(tmp_path, capsys):
+    good = tmp_path / "-p" / "good.jsonl"
+    bad = tmp_path / "-p" / "bad.jsonl"
+    _write(str(good), [_asst("a", 0, [])])
+    _write(str(bad), [_asst("b", 0, [])])
+    os.chmod(bad, 0)
+    try:
+        if os.access(bad, os.R_OK):
+            pytest.skip("running as a user that can read mode-000 files")
+        errs = []
+        rows = scan(load_prices(None), str(tmp_path), jobs=1, errors=errs)
+        assert len(rows) == 1 and len(errs) == 1 and errs[0]["error"] == "PermissionError"
+        assert cli.main(["report", str(tmp_path), "--jobs", "1", "--format", "json"]) == 3
+        err = capsys.readouterr().err
+        assert "UNDERESTIMATED" in err and "bad.jsonl" in err and "-p" not in err.split("bad.jsonl")[0].split("\n")[-1]
+        assert cli.main(["scan", str(tmp_path), "-o", str(tmp_path / "o.json"), "--jobs", "1"]) == 3
+    finally:
+        os.chmod(bad, 0o644)
+
+
+def test_big_outputs_filtered_by_timestamp(tmp_path):
+    f = tmp_path / "-p" / "s.jsonl"
+    big = lambda ts: {"type": "user", "timestamp": ts, "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "t", "content": "y" * 25000}]}}
+    _write(str(f), [_asst("a", 0, []), big("2026-10-01T00:00:05Z"), big("2026-11-15T00:00:00Z")])
+    assert scan(load_prices(None), str(tmp_path), jobs=1)[0]["big_outputs"] == 2
+    r = scan(load_prices(None), str(tmp_path), jobs=1, until=parse_date("2026-10-31", end=True))[0]
+    assert r["big_outputs"] == 1
+
+
+def test_until_end_of_day_across_dst(monkeypatch):
+    import time
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+    try:
+        assert parse_date("2026-03-08", end=True) - parse_date("2026-03-08") == 23 * 3600   # spring forward
+        assert parse_date("2026-11-01", end=True) - parse_date("2026-11-01") == 25 * 3600   # fall back
+        assert parse_date("2026-10-01", end=True) - parse_date("2026-10-01") == 24 * 3600
+    finally:
+        monkeypatch.undo()
+        time.tzset()

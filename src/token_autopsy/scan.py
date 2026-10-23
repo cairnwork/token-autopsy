@@ -11,7 +11,7 @@ import json
 import multiprocessing as mp
 import os
 import statistics
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import hashlib
 import re
@@ -40,21 +40,23 @@ def bucket_of(ctx: int) -> int:
 
 
 # ---------------------------------------------------------------- parsers
-def _big_results(line: str) -> int:
-    """Count tool_result blocks larger than BIG_OUTPUT_CHARS (sizes only, text discarded)."""
+def _big_results(line: str) -> list:
+    """Timestamps (epoch, None if missing) of tool_result blocks larger than BIG_OUTPUT_CHARS
+    (sizes only, text discarded)."""
     try:
         o = json.loads(line)
     except ValueError:
-        return 0
+        return []
     c = (o.get("message") or {}).get("content")
-    n = 0
+    n = []
+    ts = parse_ts(o.get("timestamp"))
     if isinstance(c, list):
         for b in c:
             if isinstance(b, dict) and b.get("type") == "tool_result":
                 x = b.get("content")
                 size = len(x) if isinstance(x, str) else sum(len(y.get("text") or "") for y in x if isinstance(y, dict)) if isinstance(x, list) else 0
                 if size > BIG_OUTPUT_CHARS:
-                    n += 1
+                    n.append(ts)
     return n
 
 
@@ -91,13 +93,13 @@ def parse_claude(path: str):
     """Yield-free parser: returns (calls, tools). Calls are dicts, tools are tuples."""
     calls, tools, idx = [], [], {}
     seen_tool_ids: set = set()
-    big = 0
+    big: list = []
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             # cheap pre-filter only on whitespace-independent substrings; json.loads decides
             if '"assistant"' not in line:
                 if '"tool_result"' in line and len(line) > BIG_OUTPUT_CHARS and '"user"' in line:
-                    big += _big_results(line)
+                    big.extend(_big_results(line))
                 continue
             try:
                 o = json.loads(line)
@@ -156,7 +158,7 @@ def _zero_row(sid, root, project, tool, sub):
     }
 
 
-def analyze(calls, tools, pricer: Pricer, row: dict, since=None, until=None) -> dict | None:
+def analyze(calls, tools, pricer: Pricer, row: dict, since=None, until=None, bigs=()) -> dict | None:
     """Fill `row` from parsed calls/tools. Returns None if nothing in range."""
     if since is not None or until is not None:
         keep = {}
@@ -171,6 +173,8 @@ def analyze(calls, tools, pricer: Pricer, row: dict, since=None, until=None) -> 
         calls = new_calls
     if not calls:
         return None
+    row["big_outputs"] = sum(1 for t in bigs if (since is None or (t is not None and t >= since))
+                             and (until is None or (t is not None and t < until)))
     n = len(calls)
     costs = [0.0] * n
     ctxs = [0] * n
@@ -204,8 +208,7 @@ def analyze(calls, tools, pricer: Pricer, row: dict, since=None, until=None) -> 
     row["median_ctx"] = int(statistics.median(ctxs))
     first = calls[0]
     row["base_ctx"] = ctxs[0]
-    p0, _ = pricer.lookup(first["model"])
-    row["base_cost"] = min(ctxs[0] * (n - 1) * p0["cache_read"] / 1e6, row["cost_cr"])
+    row["base_cost"] = sum(basecost.values())   # per-call, each at its own model's cache-read price
     tss = [c["ts"] for c in calls if c["ts"] is not None]
     row["first_ts"], row["last_ts"] = (min(tss), max(tss)) if tss else (None, None)
 
@@ -296,6 +299,13 @@ def discover(claude_root: str, project: str | None):
     return files
 
 
+def _size(p: str) -> int:
+    try:
+        return os.path.getsize(p)
+    except OSError:
+        return 0
+
+
 _G: dict = {}
 
 
@@ -315,23 +325,37 @@ def _work(path):
         if not calls:
             return None
         row = _zero_row(stem, root, project, "claude", sub)
-        row["big_outputs"] = big
-        return analyze(calls, tools, _G["pricer"], row, _G["since"], _G["until"])
-    except OSError:
-        return None
+        return analyze(calls, tools, _G["pricer"], row, _G["since"], _G["until"], big)
+    except OSError as e:
+        return {"error": type(e).__name__, "path": path}
 
 
 def scan(table: dict, claude_root: str = CLAUDE_ROOT, since: float | None = None, until: float | None = None,
-         project: str | None = None, jobs: int | None = None, show_paths: bool = False) -> list[dict]:
+         project: str | None = None, jobs: int | None = None, show_paths: bool = False,
+         errors: list | None = None) -> list[dict]:
+    """Scan and return rows. Files that cannot be read are appended to `errors` (if given) as
+    {"error": ExceptionName, "path": file} instead of being silently treated as empty."""
+    def collect(results):
+        rows = []
+        for r in results:
+            if r is None:
+                continue
+            if "error" in r:
+                if errors is not None:
+                    errors.append(r)
+            else:
+                rows.append(r)
+        return rows
+
     files = discover(claude_root, project)
-    files.sort(key=lambda p: -os.path.getsize(p))  # big first for load balance
+    files.sort(key=_size, reverse=True)  # big first for load balance
     jobs = jobs or min(8, os.cpu_count() or 1)
     args = (table, since, until, claude_root, show_paths, "" if show_paths else get_salt())
     if jobs <= 1 or len(files) < 2:
         _init(*args)
-        return [r for r in map(_work, files) if r]
+        return collect(map(_work, files))
     with mp.Pool(jobs, initializer=_init, initargs=args) as pool:
-        return [r for r in pool.imap_unordered(_work, files, chunksize=4) if r]
+        return collect(pool.imap_unordered(_work, files, chunksize=4))
 
 
 def parse_date(s: str, end: bool = False) -> float:
@@ -340,7 +364,9 @@ def parse_date(s: str, end: bool = False) -> float:
     instant; one without is local time. A datetime is an exact instant even with end=True."""
     s = s.strip()
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
-        ts = datetime.strptime(s, "%Y-%m-%d").timestamp()
-        return ts + 86400 if end else ts
+        d = datetime.strptime(s, "%Y-%m-%d")
+        if end:
+            d += timedelta(days=1)   # calendar day, not 86400 s: DST days are 23 or 25 hours long
+        return d.timestamp()
     d = datetime.fromisoformat(s[:-1] + "+00:00" if s.endswith("Z") else s)
     return d.timestamp()  # naive -> local time, aware -> that instant

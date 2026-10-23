@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0 (Codex review, Issue #2)
+- Base re-read cost uses each call's own model price.
+- Unreadable files are reported and give exit code 3 instead of being silently skipped.
+- Large tool outputs are filtered by timestamp with `--since/--until`.
+- Bare-date `--until` adds a calendar day (DST-safe).
+
 ## 0.1.0 (second external review, Issue #1)
 - tool_use blocks de-duplicated by block id (verified no inflation on real logs: 0 duplicates in 24,506 blocks).
 - `--until`/`--since` accept datetimes with any UTC offset; a datetime is an exact instant.

@@ -51,6 +51,9 @@ def filter_rows(rows: list[dict], since: str | None, until: str | None, project:
     return out
 
 
+SCAN_ERRORS: list = []
+
+
 def run_scan(a) -> list[dict]:
     if a.from_file:
         with open(a.from_file, encoding="utf-8") as f:
@@ -63,7 +66,26 @@ def run_scan(a) -> list[dict]:
     claude = a.path or CLAUDE_ROOT
     since = parse_date(a.since) if a.since else None
     until = parse_date(a.until, end=True) if a.until else None
-    return scan(table, claude, since, until, a.project, a.jobs, getattr(a, "show_paths", False))
+    SCAN_ERRORS.clear()
+    return scan(table, claude, since, until, a.project, a.jobs, getattr(a, "show_paths", False),
+                errors=SCAN_ERRORS)
+
+
+def report_errors(a) -> int:
+    """List unreadable files on stderr (project dir masked unless --show-paths); return exit code."""
+    if not SCAN_ERRORS:
+        return 0
+    salt = "" if getattr(a, "show_paths", False) else get_salt()
+    print(f"error: {len(SCAN_ERRORS)} file(s) could not be read; totals are UNDERESTIMATED:", file=sys.stderr)
+    root = os.path.expanduser(getattr(a, "path", None) or CLAUDE_ROOT)
+    for e in SCAN_ERRORS[:20]:
+        rel = os.path.relpath(e["path"], root).split(os.sep)
+        if salt:
+            rel[0] = mask(rel[0], salt)
+        print(f"  {e['error']}: {os.sep.join(rel)}", file=sys.stderr)
+    if len(SCAN_ERRORS) > 20:
+        print(f"  ... and {len(SCAN_ERRORS) - 20} more", file=sys.stderr)
+    return 3
 
 
 def cmd_scan(a) -> int:
@@ -75,7 +97,7 @@ def cmd_scan(a) -> int:
     s = summarize(rows)
     print(f"scanned {s['files']} files / {s['sessions']} sessions / {s['calls']:,} calls "
           f"in {time.time() - t0:.1f}s; estimated cost ${s['cost']:,.0f}; saved {out}")
-    return 0
+    return report_errors(a)
 
 
 def cmd_report(a) -> int:
@@ -89,7 +111,7 @@ def cmd_report(a) -> int:
             f.write(text)
     else:
         sys.stdout.write(text)
-    return 0
+    return report_errors(a)
 
 
 def cmd_rules(a) -> int:
@@ -99,7 +121,7 @@ def cmd_rules(a) -> int:
         sys.stdout.write(json.dumps(d["rules"], indent=2) + "\n")
     else:
         sys.stdout.write(render(build_rules_blocks(s, a.lang), a.format))
-    return 0
+    return report_errors(a)
 
 
 def main(argv=None) -> int:
