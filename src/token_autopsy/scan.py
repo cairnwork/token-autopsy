@@ -140,7 +140,7 @@ def _zero_row(sid, root, project, tool, sub):
         "cost_in": 0.0, "cost_cw": 0.0, "cost_cr": 0.0, "cost_out": 0.0, "cost": 0.0,
         "bucket_cost": [0.0] * 3, "bucket_tok": [0] * 3, "bucket_calls": [0] * 3,
         "max_ctx": 0, "median_ctx": 0, "base_ctx": 0, "base_cost": 0.0,
-        "over200_excess_cost": 0.0,
+        "over200_excess_cost": 0.0, "dd_d1": 0.0, "dd_d2": 0.0, "dd_d3": 0.0, "dd_d4": 0.0,
         "poll_calls": 0, "poll_cost": 0.0, "sleep_calls": 0, "sleep_cost": 0.0, "sleep_secs": 0.0,
         "repeat_calls": 0, "repeat_cost": 0.0,
         "browse_calls": 0, "browse_cost": 0.0, "explore_calls": 0, "explore_cost": 0.0, "waste_runs": 0, "waste_calls": 0, "waste_cost": 0.0,
@@ -166,6 +166,9 @@ def analyze(calls, tools, pricer: Pricer, row: dict, since=None, until=None) -> 
     n = len(calls)
     costs = [0.0] * n
     ctxs = [0] * n
+    excess: dict[int, float] = {}
+    basecost: dict[int, float] = {}
+    ctxs0 = calls[0]["in"] + calls[0]["cw"] + calls[0]["cr"]
     for i, c in enumerate(calls):
         ci, cw, cr, co = pricer.cost(c["model"], c["in"], c["cw"], c["cr"], c["out"], c.get("cw1h", 0))
         tot = ci + cw + cr + co
@@ -183,7 +186,11 @@ def analyze(calls, tools, pricer: Pricer, row: dict, since=None, until=None) -> 
         if fb:
             row["unknown_model_cost"] += tot
         if ctx > BUCKETS[1]:
-            row["over200_excess_cost"] += (ctx - BUCKETS[1]) * p["cache_read"] / 1e6
+            e = (ctx - BUCKETS[1]) * p["cache_read"] / 1e6
+            row["over200_excess_cost"] += e
+            excess[i] = e
+        if i > 0:
+            basecost[i] = min(ctxs0, c["cr"]) * p["cache_read"] / 1e6
     row["n_calls"] = n
     row["max_ctx"] = max(ctxs)
     row["median_ctx"] = int(statistics.median(ctxs))
@@ -253,6 +260,19 @@ def analyze(calls, tools, pricer: Pricer, row: dict, since=None, until=None) -> 
     close_run(None)
     row["waste_runs"], row["waste_calls"] = runs, len(waste_t)
     row["waste_cost"] = share(waste_t)
+
+    # De-duplicated attribution: each call counts toward at most one rule, priority d1 > d2 > d3 > d4.
+    for i in range(n):
+        w = costs[i] * waste_t[i] / ntools[i] if i in waste_t else 0.0
+        pl = costs[i] * poll_t[i] / ntools[i] if i in poll_t else 0.0
+        if excess.get(i):
+            row["dd_d1"] += excess[i]
+        elif pl:
+            row["dd_d2"] += pl
+        elif basecost.get(i):
+            row["dd_d3"] += basecost[i]
+        elif w:
+            row["dd_d4"] += w
     return row
 
 

@@ -7,7 +7,8 @@ from datetime import datetime
 SUM_KEYS = ["n_calls", "in", "cw", "cr", "out", "cost_in", "cost_cw", "cost_cr", "cost_out", "cost",
             "base_cost", "over200_excess_cost", "poll_calls", "poll_cost", "sleep_calls", "sleep_cost",
             "sleep_secs", "repeat_calls", "repeat_cost", "browse_calls", "browse_cost", "explore_calls", "explore_cost", "waste_runs",
-            "waste_calls", "waste_cost", "unknown_model_cost", "big_outputs"]
+            "waste_calls", "waste_cost", "unknown_model_cost", "big_outputs",
+            "dd_d1", "dd_d2", "dd_d3", "dd_d4"]
 
 
 def _pct(a: float, b: float) -> float:
@@ -110,6 +111,7 @@ def summarize(rows: list[dict], top: int = 10) -> dict:
         "long_sessions": {"n": len(long_rows), "cost": _sum(long_rows, "cost"),
                           "cost_pct": _pct(_sum(long_rows, "cost"), tot_cost)},
         "over200_excess_cost": _sum(rows, "over200_excess_cost"),
+        "dedup": {k: _sum(rows, "dd_" + k) for k in ("d1", "d2", "d3", "d4")},
         "subagents": {
             "n": len(sub), "cost": sub_cost, "cost_pct": _pct(sub_cost, tot_cost),
             "median_base_ctx": int(statistics.median(base_ctxs)) if base_ctxs else 0,

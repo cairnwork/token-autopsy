@@ -2,7 +2,7 @@
 
 Reference: a manual, one-off autopsy of the same logs (3,814 files, 2026-10-08..10-22) done with ad-hoc scripts before this tool existed. It priced everything at one flat Opus-class rate and attributed re-reads by source.
 This run: `token-autopsy scan` on `~/.claude/projects` on 2026-10-23 (3,928 files, 582 sessions, 7.6 GB).
-Speed: **about 3-5 seconds** wall clock (5.7 s in the last run; 8 processes; limit was 2 minutes). Only assistant lines (usage + tool_use) and the size of tool results are parsed.
+Speed: **a few seconds** wall clock (5.7 s measured on 582 sessions; 8 processes; limit was 2 minutes). Only assistant lines (usage + tool_use) and the size of tool results are parsed.
 
 | Metric | Earlier autopsy | token-autopsy | Verdict |
 |---|---|---|---|
@@ -23,3 +23,9 @@ Speed: **about 3-5 seconds** wall clock (5.7 s in the last run; 8 processes; lim
 - A call's cost is split equally across its tool_use blocks before being attributed to polling/browsing, so parallel tools in one call are not each charged the whole call.
 - Rule savings (`rules`) are estimates with explicit assumptions listed in the output. d1 (restart at 200k) is optimistic because a restart also costs a summary; the 14-16% for d3 is an assumed constant.
 - Codex logs are not read in v0.1 (planned for v0.2).
+
+## Savings estimates (post-review)
+- Per-rule savings are **modelled estimates, not measured reductions**, and the rules overlap (one call can be long-context, polling and base re-read at once), so they are never summed.
+- `rules` prints one de-duplicated bound: every API call is attributed to at most one rule (priority d1 > d2 > d3 > d4) and only that part is counted. On the 2026-10-23 sample the bound is 12.0%-22.6% of estimated cost, against 16.7%-29.3% for the old plain sum.
+- All figures come from one machine's sample, not a general rate; API list-price equivalents do not translate directly into subscription quota.
+- Cache re-read is 96.2% of tokens but 49.1% of cost; cache hits are not waste in themselves.

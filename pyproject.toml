@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "token-autopsy"
 version = "0.1.0"
-description = "Zero-model cost autopsy of local Claude Code / Codex session logs: where did my tokens go?"
+description = "Zero-model cost autopsy of local Claude Code session logs (Codex support planned for v0.2): find actionable usage patterns in logs you already have."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }

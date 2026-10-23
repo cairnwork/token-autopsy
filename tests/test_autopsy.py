@@ -224,14 +224,29 @@ def test_subagent_root_parsing(tmp_path):
     assert roots["agent-1"] == "sid1" and roots["x"] == "x"
 
 
-def test_rules_bounds_never_invert():
-    base = {"calls": 10, "cost": 100.0, "over200_excess_cost": 400.0,
-            "polling": {"cost": 300.0, "calls": 1}, "browse": {"waste_cost": 300.0},
-            "subagents": {"base_cost": 300.0, "median_base_ctx": 1000}, "main_base": {"base_cost": 0.0}}
-    txt = render(build_rules_blocks(base, "en"), "text")     # no ZeroDivisionError, no negatives
-    import re
-    m = re.search(r"Combined[^:]*: ([\d.]+)% - ([\d.]+)%", txt)
-    assert float(m.group(1)) <= float(m.group(2)) <= 95.0
+def test_rules_no_summed_total_and_dedup_bound(summ):
+    txt = render(build_rules_blocks(summ, "en"), "text")
+    assert "Combined" not in txt and "De-duplicated upper bound" in txt
+    assert txt.lower().count("modelled estimate, not measured") >= 4
+    assert "do not add" in txt
+    zh = render(build_rules_blocks(summ, "zh"), "text")
+    assert "去重上界" in zh and "模型化估計，非實測" in zh
+
+
+def test_dedup_counts_each_call_once(rows, summ):
+    for r in rows:
+        assert r["dd_d1"] + r["dd_d2"] + r["dd_d3"] + r["dd_d4"] <= r["cost"] + 1e-12
+    rules = derive(summ)
+    assert sum(r["dedup_high"] for r in rules) <= sum(r["save_high"] for r in rules) + 1e-12
+    # fixture: call m6 (sleep poll) sits at 64k ctx, so it is attributed to d2, not d1
+    m = by_id(rows, "sess-main")
+    assert m["dd_d1"] > 0 and m["dd_d2"] > 0 and m["dd_d2"] <= m["poll_cost"]
+
+
+def test_report_has_cache_note_and_sample_note(summ):
+    txt = render(build_blocks(summ, "en"), "text")
+    assert "not waste in themselves" in txt and "one machine's sample" in txt
+    assert "no raw conversation content is written" in txt
 
 
 def test_from_file_applies_filters(tmp_path, capsys):

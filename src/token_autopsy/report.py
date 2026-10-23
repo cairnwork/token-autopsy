@@ -44,6 +44,8 @@ def build_blocks(s: dict, lang: str = "en") -> list:
                      usd(cp[key]), f"{s['cost_parts_pct'][key]:.1f}%"])
     B.append(("table", [t["kind"], "tokens", t["share_tok"], t["cost_col"], t["share_cost"]], rows))
     B.append(("p", t["warn"]))
+    B.append(("p", t["cache_note"].format(tok=100 * tk["cr"] / s["total_tokens"], cost=s["cost_parts_pct"]["cr"])))
+    B.append(("p", t["sample_note"]))
     B.append(("h2", t["sec_ctx"]))
     tt = s["total_tokens"] or 1
     B.append(("table", [t["bucket"], t["calls_col"], "tokens", t["share_tok"], t["cost_col"], t["share_cost"]],
@@ -95,14 +97,15 @@ def build_rules_blocks(s: dict, lang: str = "en") -> list:
         B.append(("h2", f"{r['rank']}. {t['rule_' + c]}"))
         B.append(("p", why))
         B.append(("p", f"{t['saving']}: {r['save_low_pct']:.1f}% - {r['save_high_pct']:.1f}% "
-                       f"({usd(r['save_low'])} - {usd(r['save_high'])}, {t['warn_short']})"))
-    lo, hi = sum(r["save_low"] for r in rules), sum(r["save_high"] for r in rules)
+                       f"({usd(r['save_low'])} - {usd(r['save_high'])}); {t['modelled']}; {t['overlap_flag']}"))
     tot = s["cost"] or 1e-9
-    phi = min(95.0, 100 * hi / tot)
-    plo = min(phi, 90.0, 100 * lo / tot)
-    B.append(("p", f"{t['total_save']}: {plo:.1f}% - {phi:.1f}%"))
-    B.append(("p", t["headroom"].format(lo=100 * (1 / (1 - plo / 100) - 1), hi=100 * (1 / (1 - phi / 100) - 1))))
+    dlo = sum(r["dedup_low"] for r in rules)
+    dhi = sum(r["dedup_high"] for r in rules)
+    plo, phi = 100 * dlo / tot, 100 * dhi / tot
+    B.append(("p", t["dedup_bound"].format(lo=plo, hi=phi, usd_lo=usd(dlo), usd_hi=usd(dhi))))
+    B.append(("p", t["overlap_note"]))
     B.append(("p", t["rules_note"]))
+    B.append(("p", t["sample_note"]))
     B.append(("p", t["footer"]))
     return B
 

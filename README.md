@@ -1,10 +1,10 @@
 # token-autopsy
 
-**English.** Where did my tokens go? `token-autopsy` reads your local Claude Code session logs (`~/.claude/projects`) with **no model calls and no network**, and tells you how much of your usage is cache re-reads, how much was spent at huge context sizes, how much goes to polling loops and subagent base context, and which three rules would save the most. Think of it as a way to hit your weekly plan limit less often. Standard library only, Python 3.10+.
+**English.** `token-autopsy` finds actionable usage patterns in session logs you already have. It reads your local Claude Code logs (`~/.claude/projects`) with **no model calls and no network** and points at specific, fixable patterns: very long contexts that get re-read on every call, sleep-loop polling, subagent base context, file-hunting sprawl. It is not another token dashboard (tools like cc-analyzer or token-stats already chart usage); the point is the three rules at the end. Standard library only, Python 3.10+, Claude Code only (Codex is planned for v0.2).
 
-**中文。** 「我的 token 花到哪去了？」`token-autopsy` 只讀本機 Claude Code 的 session 紀錄（`~/.claude/projects`），**不呼叫任何模型、不連網**，列出快取重讀比例、超長脈絡（>200k）的花費、輪詢與子代理基底浪費，並給出最能省額度的三條規則（照改可少撞幾次每週上限）。只用標準庫，Python 3.10 以上。
+**中文。** `token-autopsy` 從你已有的紀錄找出可以採取行動的使用模式：只讀本機 Claude Code 紀錄（`~/.claude/projects`），**不呼叫模型、不連網**，指出超長脈絡反覆重讀、sleep 輪詢、子代理基底、找檔亂翻等可修正的模式。它不是另一套 token 儀表板，重點是最後的三條規則。只用標準庫，Python 3.10 以上，目前只支援 Claude Code（Codex 預計 v0.2）。
 
-All dollar figures are **estimates at nominal list price, not a bill** (subscription users pay in quota). The primary measures are token counts and usage share.
+All dollar figures are **estimates at list price, not a bill** (subscription users pay in quota). All savings figures are **modelled estimates, not measured reductions**. The example numbers below come from **one machine's sample**, not a general rate.
 
 ## Install
 
@@ -17,7 +17,7 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 ## Usage
 
 ```sh
-token-autopsy scan                         # scan ~/.claude/projects, save token-autopsy-scan.json (about 3-5 seconds for ~4,000 files)
+token-autopsy scan                         # scan ~/.claude/projects, save token-autopsy-scan.json (a few seconds: 5.7 s measured on 582 sessions)
 token-autopsy report                       # text report; add --format markdown|json, --lang zh, -o FILE
 token-autopsy rules --lang zh              # the three rules with estimated saving
 ```
@@ -26,32 +26,38 @@ Filters (all subcommands): `--since 2026-10-01 --until 2026-10-15 --project myre
 
 Prices (list prices dated 2026-10-23, please keep them updated): edit `src/token_autopsy/default_prices.json` or pass `--prices FILE` (or put one at `~/.config/token-autopsy/prices.json`). Unknown models use the fallback rate and are flagged.
 
-## Example output (numbers from the author's machine, 3,928 files, 2026-10-23)
+## Example output (one machine's sample: 3,963 files, 597 sessions, 2026-10-23; not a general rate)
 
 ```
-Tokens                      26.89B
-Estimated cost (secondary)  $11,806  [estimate, not a bill]
+Tokens                      27.12B
+Estimated cost (secondary)  $11,899  [estimate, not a bill]
 
 Kind           tokens   % tokens  Cost    % cost
-cache re-read  25.88B   96.2%     $5,790  49.0%
-cache write    970.52M  3.6%      $5,066  42.9%
-Context  Calls   tokens   % tokens  Cost    % cost
-<50k     16,631  464.69M  1.7%      $577    4.9%
-50-200k  68,867  7.66B    28.5%     $3,483  29.5%
->200k    43,621  18.76B   69.8%     $7,746  65.6%
-Polling calls: 5373 costing $894 (7.6% of total)
+cache re-read  26.09B   96.2%     $5,836  49.1%
+cache write    977.09M  3.6%      $5,093  42.8%
+Cache hits are not waste in themselves; the cost comes from how large the
+context was when it was re-read.
 
-1. Restart or compact once context passes 200k tokens.  saves 10.1% - 20.2%
-2. Never poll with sleep loops; use one blocking wait.   saves 5.3% - 7.6%
-3. Trim the base context (tool definitions, CLAUDE.md).   saves 1.3% - 1.5%  (assumed constant)
+Context  Calls   % tokens  % cost
+>200k    ~44k    ~70%      ~66%
+Polling calls: 5392 costing $895 (7.5% of total)
+
+1. Restart or compact once context passes 200k tokens.
+   modelled estimate: 10-20% of cost; overlaps with the other rules, do not add
+2. Never poll with sleep loops; use one blocking wait.
+   modelled estimate: 5.3-7.5% of cost; overlaps with the other rules, do not add
+3. Trim the base context (tool definitions, CLAUDE.md).
+   modelled estimate: 1.3-1.5% (assumed constant); overlaps, do not add
 ```
+
+The three per-rule estimates overlap and are never summed; `rules` prints one de-duplicated bound (each API call counted toward at most one rule) as the only combined figure.
 
 See `docs/VALIDATION.md` for how these numbers compare with the earlier manual autopsy, and what each estimate assumes.
 
 ## Privacy
 
 - Everything runs locally. **The tool opens no network connections.**
-- Output (screen, JSON, Markdown, scan file) contains only aggregate numbers, session ids, model names, tool-name-derived counts and timestamps.
+- **No raw conversation content is written**; session ids and timestamps are kept. Output (screen, JSON, Markdown, scan file) contains aggregate numbers, session ids, model names, tool-name-derived counts and timestamps.
 - Project directory names are **masked as `proj-<hash>` by default** (salted hash; the random salt is created once per machine in `~/.config/token-autopsy/salt`, mode 0600, so masks cannot be reversed with a dictionary of known paths). Pass `--show-paths` to show real names.
 - Prompts, file contents, command text and tool output are read in memory only to classify them (e.g. "is this a `sleep` loop?") and are never stored or printed. Repeated-command detection uses a hash that stays in memory.
 - Tests use synthetic fixtures only.

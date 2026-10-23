@@ -27,11 +27,14 @@ def derive(s: dict) -> list[dict]:
     for code, basis in raw.items():
         lo, hi = LOW_HIGH[code]
         out.append({"code": code, "basis_cost": basis, "basis_pct": 100 * basis / tot,
+                    "dedup_basis_cost": s["dedup"][code],
+                    "dedup_low": s["dedup"][code] * lo, "dedup_high": s["dedup"][code] * hi,
                     "save_low": basis * lo, "save_high": basis * hi,
                     "save_low_pct": 100 * basis * lo / tot, "save_high_pct": 100 * basis * hi / tot})
     out.sort(key=lambda r: -(r["save_low"] + r["save_high"]))
     top = out[:3]
     for i, r in enumerate(top, 1):
         r["rank"] = i
-    # savings overlap between rules, so the combined figure is a plain sum capped at 100%
+    # per-rule estimates overlap (one call can match several rules); the dedup_* fields attribute
+    # each call to at most one rule (priority d1 > d2 > d3 > d4) and are the only figures that may be summed.
     return top
