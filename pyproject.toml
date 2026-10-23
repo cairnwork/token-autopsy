@@ -13,7 +13,7 @@ authors = [{ name = "James3014" }]
 dependencies = []
 
 [project.optional-dependencies]
-test = ["pytest"]
+dev = ["pytest"]
 
 [project.scripts]
 token-autopsy = "token_autopsy.cli:main"

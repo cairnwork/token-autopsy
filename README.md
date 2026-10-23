@@ -56,10 +56,14 @@ See `docs/VALIDATION.md` for how these numbers compare with the earlier manual a
 - Prompts, file contents, command text and tool output are read in memory only to classify them (e.g. "is this a `sleep` loop?") and are never stored or printed. Repeated-command detection uses a hash that stays in memory.
 - Tests use synthetic fixtures only.
 
+## Tests
+
+In a venv: `pip install -e .[dev]` then `pytest`.
+
 ## Limits
 
 Claude Code only in v0.1 (Codex planned for v0.2). Savings are estimates with stated assumptions, not guarantees.
 
-Next step: [Cairnwork](https://github.com/cairnwork/cairnwork) (the main product) applies these guardrails automatically.
+Next step: to make sure PRs merged to main are really complete and backed by evidence, see [Cairnwork](https://github.com/cairnwork/cairnwork) (the main product).
 
 License: Apache-2.0. Author: James3014.
